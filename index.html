@@ -86,17 +86,22 @@
     font-size: 12px;
   }
   .row:last-child { border-bottom: none; }
-  .row .mark { font-size: 12px; width: 14px; text-align: center; flex-shrink: 0; }
-  .row .time { color: var(--muted); font-size: 10px; width: 34px; flex-shrink: 0; }
+  .row.alert { background: color-mix(in srgb, var(--down) 8%, transparent); }
+  .row .time {
+    display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2;
+    color: var(--muted); font-size: 10px; width: 34px; flex-shrink: 0;
+  }
+  .row .time .t { font-weight: 600; color: var(--text); }
   .row .price { font-weight: 600; flex-shrink: 0; white-space: nowrap; }
   .row .pct { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .row.alert .pct { font-weight: 700; }
+  .col-head .unit { font-weight: 400; color: var(--muted); font-size: 0.7em; }
   @media (min-width: 480px) {
     .board { gap: 12px; padding: 8px 12px 24px; }
     .col-head { padding: 12px 14px; flex-direction: row; justify-content: space-between; align-items: baseline; }
     .col-head h2 { font-size: 16px; }
     .col-head .updated { font-size: 11px; }
     .row { gap: 10px; padding: 10px 14px; font-size: 14px; }
-    .row .mark { font-size: 15px; width: 18px; }
     .row .time { font-size: 12px; width: 64px; }
   }
   .pct.up { color: var(--up); }
@@ -121,7 +126,7 @@
 <div class="board">
   <section class="col" id="col-gold">
     <div class="col-head">
-      <h2>🥇 Золото</h2>
+      <h2>🥇 Золото <span class="unit">₽ / %</span></h2>
       <span class="updated" id="gold-updated">обновляется…</span>
     </div>
     <div class="rows" id="gold-rows"><div class="msg">Загрузка…</div></div>
@@ -129,7 +134,7 @@
 
   <section class="col" id="col-btc">
     <div class="col-head">
-      <h2>₿ Биткоин</h2>
+      <h2>₿ Биткоин <span class="unit">$ / %</span></h2>
       <span class="updated" id="btc-updated">обновляется…</span>
     </div>
     <div class="rows" id="btc-rows"><div class="msg">Загрузка…</div></div>
@@ -143,23 +148,24 @@ const GOLD_THRESHOLD_PCT = 2.0;   // тот же порог, что и в Telegr
 const BTC_THRESHOLD_PCT = 5.0;    // тот же порог, что и в Telegram-боте (btc_alert.py)
 const MAX_ROWS = 30;
 
-function fmtTime(epochMs) {
+// Дата и время отдельно — рендерятся в строке в две строки (день.месяц сверху,
+// часы:минуты снизу), чтобы не занимать лишнюю ширину. Единицы измерения (₽/$/%)
+// вынесены в шапку колонки, поэтому здесь только цифры.
+function fmtDatePart(epochMs) {
+  return new Date(epochMs).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
+function fmtTimePart(epochMs) {
+  return new Date(epochMs).toLocaleString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+function fmtFullTime(epochMs) {
   return new Date(epochMs).toLocaleString('ru-RU', {
     day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
   });
 }
 
-// Короткий вид (только часы:минуты) — чтобы обе колонки помещались рядом на
-// узком экране телефона. Полная дата остаётся во всплывающей подсказке (title).
-function fmtTimeShort(epochMs) {
-  return new Date(epochMs).toLocaleString('ru-RU', {
-    hour: '2-digit', minute: '2-digit'
-  });
-}
-
 function fmtPrice(value, currency) {
-  if (currency === 'usd') return '$' + value.toLocaleString('ru-RU', {maximumFractionDigits: 0});
-  return value.toLocaleString('ru-RU', {maximumFractionDigits: 2}) + ' ₽';
+  const digits = currency === 'usd' ? 0 : 2;
+  return value.toLocaleString('ru-RU', {maximumFractionDigits: digits});
 }
 
 function pctClass(pct) {
@@ -177,11 +183,12 @@ function renderRows(containerId, entries, currency, thresholdPct) {
   }
   el.innerHTML = entries.map(e => {
     const hasPct = e.pct !== null && e.pct !== undefined;
-    const mark = hasPct ? (Math.abs(e.pct) >= thresholdPct ? '🔔' : '📊') : '•';
-    const pctText = hasPct ? (e.pct >= 0 ? '+' : '') + e.pct.toFixed(2) + '%' : '—';
-    return `<div class="row">
-      <span class="mark">${mark}</span>
-      <span class="time" title="${fmtTime(e.time)}">${fmtTimeShort(e.time)}</span>
+    const isAlert = hasPct && Math.abs(e.pct) >= thresholdPct;
+    const pctText = hasPct ? (e.pct >= 0 ? '+' : '') + e.pct.toFixed(2) : '—';
+    return `<div class="row${isAlert ? ' alert' : ''}">
+      <span class="time" title="${fmtFullTime(e.time)}">
+        <span class="d">${fmtDatePart(e.time)}</span><span class="t">${fmtTimePart(e.time)}</span>
+      </span>
       <span class="price">${fmtPrice(e.price, currency)}</span>
       <span class="pct ${pctClass(hasPct ? e.pct : null)}">${pctText}</span>
     </div>`;
@@ -237,7 +244,7 @@ async function loadGold() {
     }
     entries.sort((a, b) => b.time - a.time);
     renderRows('gold-rows', entries.slice(0, MAX_ROWS), 'rub', GOLD_THRESHOLD_PCT);
-    document.getElementById('gold-updated').textContent = 'обновлено ' + fmtTime(Date.now());
+    document.getElementById('gold-updated').textContent = 'обновлено ' + fmtTimePart(Date.now());
   } catch (e) {
     document.getElementById('gold-rows').innerHTML = '<div class="msg">Не удалось загрузить данные MOEX. Попробуй обновить страницу позже.</div>';
     document.getElementById('gold-updated').textContent = 'ошибка загрузки';
@@ -270,7 +277,7 @@ async function loadBtc() {
     });
     entries.sort((a, b) => b.time - a.time);
     renderRows('btc-rows', entries.slice(0, MAX_ROWS), 'usd', BTC_THRESHOLD_PCT);
-    document.getElementById('btc-updated').textContent = 'обновлено ' + fmtTime(Date.now());
+    document.getElementById('btc-updated').textContent = 'обновлено ' + fmtTimePart(Date.now());
   } catch (e) {
     document.getElementById('btc-rows').innerHTML = '<div class="msg">Не удалось загрузить данные CoinGecko. Попробуй обновить страницу позже.</div>';
     document.getElementById('btc-updated').textContent = 'ошибка загрузки';
