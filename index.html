@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>МонИНВЕСТ</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --text: #1c1c1e;
+    --muted: #6b6b70;
+    --border: #e2e2e5;
+    --up: #1a7f37;
+    --down: #cf222e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d0d0f;
+      --card: #1a1a1d;
+      --text: #f2f2f2;
+      --muted: #9a9a9e;
+      --border: #2c2c30;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  header {
+    padding: 16px 16px 8px;
+    text-align: center;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 20px;
+  }
+  header p {
+    margin: 4px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .board {
+    display: flex;
+    gap: 12px;
+    padding: 8px 12px 24px;
+    max-width: 900px;
+    margin: 0 auto;
+    align-items: flex-start;
+  }
+  @media (max-width: 640px) {
+    .board { flex-direction: column; }
+  }
+  .col {
+    flex: 1;
+    min-width: 0;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .col-head {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .col-head h2 {
+    margin: 0;
+    font-size: 16px;
+  }
+  .col-head .updated {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .rows { max-height: 70vh; overflow-y: auto; }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 14px;
+  }
+  .row:last-child { border-bottom: none; }
+  .row .mark { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+  .row .time { color: var(--muted); font-size: 12px; width: 64px; flex-shrink: 0; }
+  .row .price { font-weight: 600; flex-shrink: 0; }
+  .row .pct { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .pct.up { color: var(--up); }
+  .pct.down { color: var(--down); }
+  .pct.flat { color: var(--muted); }
+  .msg { padding: 16px 14px; color: var(--muted); font-size: 13px; }
+  footer {
+    text-align: center;
+    padding: 12px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📊 МонИНВЕСТ</h1>
+  <p>Слева — золото (AKGD), справа — биткоин. Сверху всегда самая свежая запись.</p>
+</header>
+
+<div class="board">
+  <section class="col" id="col-gold">
+    <div class="col-head">
+      <h2>🥇 Золото (AKGD)</h2>
+      <span class="updated" id="gold-updated">обновляется…</span>
+    </div>
+    <div class="rows" id="gold-rows"><div class="msg">Загрузка…</div></div>
+  </section>
+
+  <section class="col" id="col-btc">
+    <div class="col-head">
+      <h2>₿ Биткоин</h2>
+      <span class="updated" id="btc-updated">обновляется…</span>
+    </div>
+    <div class="rows" id="btc-rows"><div class="msg">Загрузка…</div></div>
+  </section>
+</div>
+
+<footer>Автообновление каждые 5 минут · время показано по часовому поясу твоего устройства</footer>
+
+<script>
+const GOLD_THRESHOLD_PCT = 2.0;   // тот же порог, что и в Telegram-боте (check_akgd.py)
+const BTC_THRESHOLD_PCT = 5.0;    // тот же порог, что и в Telegram-боте (btc_alert.py)
+const MAX_ROWS = 30;
+
+function fmtTime(epochMs) {
+  return new Date(epochMs).toLocaleString('ru-RU', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+  });
+}
+
+function fmtPrice(value, currency) {
+  if (currency === 'usd') return '$' + value.toLocaleString('ru-RU', {maximumFractionDigits: 0});
+  return value.toLocaleString('ru-RU', {maximumFractionDigits: 2}) + ' ₽';
+}
+
+function pctClass(pct) {
+  if (pct === null) return 'flat';
+  if (pct > 0.01) return 'up';
+  if (pct < -0.01) return 'down';
+  return 'flat';
+}
+
+function renderRows(containerId, entries, currency, thresholdPct) {
+  const el = document.getElementById(containerId);
+  if (!entries.length) {
+    el.innerHTML = '<div class="msg">Нет свежих данных (биржа закрыта или сбой источника).</div>';
+    return;
+  }
+  el.innerHTML = entries.map(e => {
+    const hasPct = e.pct !== null && e.pct !== undefined;
+    const mark = hasPct ? (Math.abs(e.pct) >= thresholdPct ? '🔔' : '📊') : '•';
+    const pctText = hasPct ? (e.pct >= 0 ? '+' : '') + e.pct.toFixed(2) + '%' : '—';
+    return `<div class="row">
+      <span class="mark">${mark}</span>
+      <span class="time">${fmtTime(e.time)}</span>
+      <span class="price">${fmtPrice(e.price, currency)}</span>
+      <span class="pct ${pctClass(hasPct ? e.pct : null)}">${pctText}</span>
+    </div>`;
+  }).join('');
+}
+
+function isoDaysAgo(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
+// Метки MOEX ("2026-09-11 07:00:00") — это московское время (UTC+3, без перевода часов).
+function moexTimeToEpoch(str) {
+  const [datePart, timePart] = str.split(' ');
+  const [y, mo, d] = datePart.split('-').map(Number);
+  const [h, mi, s] = timePart.split(':').map(Number);
+  return Date.UTC(y, mo - 1, d, h, mi, s) - 3 * 3600 * 1000;
+}
+
+async function loadGold() {
+  try {
+    const from = isoDaysAgo(5);
+    const url = `https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities/AKGD/candles.json?interval=60&iss.only=candles&from=${from}`;
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('moex http ' + resp.status);
+    const data = await resp.json();
+    const cols = data.candles.columns;
+    const closeIdx = cols.indexOf('close');
+    const beginIdx = cols.indexOf('begin');
+    const rows = data.candles.data;
+
+    // Группируем по календарному дню (по московской дате в строке begin), чтобы
+    // сравнивать каждую свечу с закрытием ПРЕДЫДУЩЕГО торгового дня — как это
+    // делает check_akgd.py через поле PREVPRICE.
+    const byDate = new Map();
+    for (const r of rows) {
+      const dateKey = r[beginIdx].slice(0, 10);
+      if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+      byDate.get(dateKey).push({ time: moexTimeToEpoch(r[beginIdx]), price: r[closeIdx] });
+    }
+    const dates = [...byDate.keys()].sort();
+
+    const entries = [];
+    for (let i = 0; i < dates.length; i++) {
+      const dayRows = byDate.get(dates[i]);
+      const prevDayRows = i > 0 ? byDate.get(dates[i - 1]) : null;
+      const prevClose = prevDayRows ? prevDayRows[prevDayRows.length - 1].price : null;
+      for (const row of dayRows) {
+        const pct = prevClose ? (row.price - prevClose) / prevClose * 100 : null;
+        entries.push({ time: row.time, price: row.price, pct });
+      }
+    }
+    entries.sort((a, b) => b.time - a.time);
+    renderRows('gold-rows', entries.slice(0, MAX_ROWS), 'rub', GOLD_THRESHOLD_PCT);
+    document.getElementById('gold-updated').textContent = 'обновлено ' + fmtTime(Date.now());
+  } catch (e) {
+    document.getElementById('gold-rows').innerHTML = '<div class="msg">Не удалось загрузить данные MOEX. Попробуй обновить страницу позже.</div>';
+    document.getElementById('gold-updated').textContent = 'ошибка загрузки';
+  }
+}
+
+async function loadBtc() {
+  try {
+    const url = 'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=3&interval=hourly';
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error('coingecko http ' + resp.status);
+    const data = await resp.json();
+    const points = data.prices; // [[timestamp_ms, price], ...] по возрастанию времени
+
+    function priceNearestTo(targetTs) {
+      // ищем точку, ближайшую к targetTs (для расчёта изменения "за 24 часа")
+      let best = null, bestDiff = Infinity;
+      for (const [ts, price] of points) {
+        const diff = Math.abs(ts - targetTs);
+        if (diff < bestDiff) { bestDiff = diff; best = price; }
+      }
+      // если ближайшая точка дальше 2 часов от цели — данных за сутки назад ещё нет
+      return bestDiff <= 2 * 3600 * 1000 ? best : null;
+    }
+
+    const entries = points.map(([ts, price]) => {
+      const dayAgoPrice = priceNearestTo(ts - 24 * 3600 * 1000);
+      const pct = dayAgoPrice ? (price - dayAgoPrice) / dayAgoPrice * 100 : null;
+      return { time: ts, price, pct };
+    });
+    entries.sort((a, b) => b.time - a.time);
+    renderRows('btc-rows', entries.slice(0, MAX_ROWS), 'usd', BTC_THRESHOLD_PCT);
+    document.getElementById('btc-updated').textContent = 'обновлено ' + fmtTime(Date.now());
+  } catch (e) {
+    document.getElementById('btc-rows').innerHTML = '<div class="msg">Не удалось загрузить данные CoinGecko. Попробуй обновить страницу позже.</div>';
+    document.getElementById('btc-updated').textContent = 'ошибка загрузки';
+  }
+}
+
+function loadAll() {
+  loadGold();
+  loadBtc();
+}
+
+loadAll();
+setInterval(loadAll, 5 * 60 * 1000);
+</script>
+
+</body>
+</html>
