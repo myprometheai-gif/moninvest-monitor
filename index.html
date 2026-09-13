@@ -46,14 +46,11 @@
   }
   .board {
     display: flex;
-    gap: 12px;
-    padding: 8px 12px 24px;
+    gap: 8px;
+    padding: 8px 8px 24px;
     max-width: 900px;
     margin: 0 auto;
     align-items: flex-start;
-  }
-  @media (max-width: 640px) {
-    .board { flex-direction: column; }
   }
   .col {
     flex: 1;
@@ -64,34 +61,44 @@
     overflow: hidden;
   }
   .col-head {
-    padding: 12px 14px;
+    padding: 10px 8px;
     border-bottom: 1px solid var(--border);
     display: flex;
-    justify-content: space-between;
-    align-items: baseline;
+    flex-direction: column;
+    gap: 2px;
   }
   .col-head h2 {
     margin: 0;
-    font-size: 16px;
+    font-size: 14px;
+    white-space: nowrap;
   }
   .col-head .updated {
-    font-size: 11px;
+    font-size: 10px;
     color: var(--muted);
   }
   .rows { max-height: 70vh; overflow-y: auto; }
   .row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
+    gap: 4px;
+    padding: 8px 6px;
     border-bottom: 1px solid var(--border);
-    font-size: 14px;
+    font-size: 12px;
   }
   .row:last-child { border-bottom: none; }
-  .row .mark { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
-  .row .time { color: var(--muted); font-size: 12px; width: 64px; flex-shrink: 0; }
-  .row .price { font-weight: 600; flex-shrink: 0; }
-  .row .pct { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .row .mark { font-size: 12px; width: 14px; text-align: center; flex-shrink: 0; }
+  .row .time { color: var(--muted); font-size: 10px; width: 34px; flex-shrink: 0; }
+  .row .price { font-weight: 600; flex-shrink: 0; white-space: nowrap; }
+  .row .pct { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  @media (min-width: 480px) {
+    .board { gap: 12px; padding: 8px 12px 24px; }
+    .col-head { padding: 12px 14px; flex-direction: row; justify-content: space-between; align-items: baseline; }
+    .col-head h2 { font-size: 16px; }
+    .col-head .updated { font-size: 11px; }
+    .row { gap: 10px; padding: 10px 14px; font-size: 14px; }
+    .row .mark { font-size: 15px; width: 18px; }
+    .row .time { font-size: 12px; width: 64px; }
+  }
   .pct.up { color: var(--up); }
   .pct.down { color: var(--down); }
   .pct.flat { color: var(--muted); }
@@ -114,7 +121,7 @@
 <div class="board">
   <section class="col" id="col-gold">
     <div class="col-head">
-      <h2>🥇 Золото (AKGD)</h2>
+      <h2>🥇 Золото</h2>
       <span class="updated" id="gold-updated">обновляется…</span>
     </div>
     <div class="rows" id="gold-rows"><div class="msg">Загрузка…</div></div>
@@ -142,6 +149,14 @@ function fmtTime(epochMs) {
   });
 }
 
+// Короткий вид (только часы:минуты) — чтобы обе колонки помещались рядом на
+// узком экране телефона. Полная дата остаётся во всплывающей подсказке (title).
+function fmtTimeShort(epochMs) {
+  return new Date(epochMs).toLocaleString('ru-RU', {
+    hour: '2-digit', minute: '2-digit'
+  });
+}
+
 function fmtPrice(value, currency) {
   if (currency === 'usd') return '$' + value.toLocaleString('ru-RU', {maximumFractionDigits: 0});
   return value.toLocaleString('ru-RU', {maximumFractionDigits: 2}) + ' ₽';
@@ -166,7 +181,7 @@ function renderRows(containerId, entries, currency, thresholdPct) {
     const pctText = hasPct ? (e.pct >= 0 ? '+' : '') + e.pct.toFixed(2) + '%' : '—';
     return `<div class="row">
       <span class="mark">${mark}</span>
-      <span class="time">${fmtTime(e.time)}</span>
+      <span class="time" title="${fmtTime(e.time)}">${fmtTimeShort(e.time)}</span>
       <span class="price">${fmtPrice(e.price, currency)}</span>
       <span class="pct ${pctClass(hasPct ? e.pct : null)}">${pctText}</span>
     </div>`;
